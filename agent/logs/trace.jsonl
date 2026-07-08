@@ -21,3 +21,9 @@
 {"type": "message", "conversation_id": "s5-escopo", "role": "lead", "text": "na verdade eu queria contratar um plano de saude pra minha familia, voces vendem isso?", "ts": "2026-07-08T11:47:35.451401+00:00"}
 {"type": "handoff", "conversation_id": "s5-escopo", "reason": "fora_de_escopo", "detail": null, "ts": "2026-07-08T11:47:46.128176+00:00"}
 {"type": "message", "conversation_id": "s5-escopo", "role": "agente", "text": "Olá! Entendo sua necessidade, mas aqui na AutoSeguro somos especializados em seguro automotivo. Para planos de saúde, sugiro que procure uma seguradora focada nesse tipo de serviço.", "ts": "2026-07-08T11:47:46.129022+00:00"}
+{"type": "message", "conversation_id": "terr", "role": "lead", "text": "oi quero um seguro pro meu carro", "ts": "2026-07-08T17:16:11.656213+00:00"}
+{"type": "handoff", "conversation_id": "terr", "reason": "erro_interno", "detail": null, "ts": "2026-07-08T17:16:57.258848+00:00"}
+{"type": "message", "conversation_id": "terr", "role": "agente", "text": "Opa, tivemos uma instabilidade momentanea por aqui. Ja vou te transferir para um de nossos atendentes concluir o seu atendimento. 🙏", "ts": "2026-07-08T17:16:57.259073+00:00"}
+{"type": "message", "conversation_id": "t50", "role": "lead", "text": "Consegue me falar um pouco sobre a autoseguro?", "ts": "2026-07-08T17:22:29.059385+00:00"}
+{"type": "handoff", "conversation_id": "t50", "reason": "fora_de_escopo", "detail": null, "ts": "2026-07-08T17:22:49.818435+00:00"}
+{"type": "message", "conversation_id": "t50", "role": "agente", "text": "Oi! A AutoSeguro é uma seguradora de veículos focada em oferecer as melhores opções de seguro auto para você.\n\nPara te dar mais detalhes sobre a empresa ou se você tiver alguma dúvida que fuja da cotação de seguro, vou te transferir para um dos nossos especialistas. Eles poderão te ajudar com todas as informações que precisar!", "ts": "2026-07-08T17:22:49.818620+00:00"}

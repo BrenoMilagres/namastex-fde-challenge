@@ -126,11 +126,15 @@ escondidos no LLM:
 | `cotacao_recusada` | 422 (idade > 75, veículo > 20 anos) — fora da alçada do bot | `handoff.from_quote` (código) |
 | `lead_pediu_humano` | lead pediu explicitamente | `handoff.from_text` — marcador `[HANDOFF:humano]` |
 | `fora_de_escopo` | assunto que não é cotação de seguro auto | `handoff.from_text` — marcador `[HANDOFF:escopo]` |
+| `erro_interno` | falha inesperada (ex.: modelo fora do ar / cota estourada) | `except` na borda do webhook ([main.py](agent/app/main.py)) |
 
 Os dois primeiros são **determinísticos** (`from_quote`, a partir do resultado da
-cotação); os dois últimos o agente **sinaliza** com um marcador no fim da mensagem,
-mapeado por `from_text`. O marcador é removido antes de a resposta chegar ao lead
-(`strip_markers`), e o determinístico tem precedência sobre o sinalizado.
+cotação); o terceiro e o quarto o agente **sinaliza** com um marcador no fim da
+mensagem, mapeado por `from_text` (o marcador é removido antes de chegar ao lead, via
+`strip_markers`, e o determinístico tem precedência). O último é uma **rede de
+segurança**: qualquer exceção não tratada no `/webhook` é logada (com stacktrace),
+registrada no trace e vira uma transferência com mensagem amigável — o canal nunca
+recebe um `500`, e nunca inventamos nada.
 
 ### Rastreabilidade
 [tracing.py](agent/app/tracing.py) grava um JSONL append-only (`agent/logs/trace.jsonl`),

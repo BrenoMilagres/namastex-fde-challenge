@@ -10,6 +10,7 @@ class HandoffReason(str, Enum):
     COTACAO_RECUSADA = "cotacao_recusada"
     LEAD_PEDIU_HUMANO = "lead_pediu_humano"
     FORA_DE_ESCOPO = "fora_de_escopo"
+    ERRO_INTERNO = "erro_interno"
 
 
 _MARKERS = {
