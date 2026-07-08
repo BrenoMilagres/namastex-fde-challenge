@@ -4,9 +4,78 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # instabilidade simulada (de proposito) -- ajuste se quiser durante o dev
-      QUOTE_FAILURE_RATE: "0.20"
-      QUOTE_SLOW_RATE: "0.10"
-      QUOTE_SLOW_SECONDS: "8"
-      # QUOTE_SEED: "42"   # descomente p/ falhas reproduziveis
+      # instabilidade simulada (de proposito). Overridavel por env pra testes:
+      #   QUOTE_FAILURE_RATE=1.0 docker compose up -d quote-api  (forca falha)
+      QUOTE_FAILURE_RATE: ${QUOTE_FAILURE_RATE:-0.20}
+      QUOTE_SLOW_RATE: ${QUOTE_SLOW_RATE:-0.10}
+      QUOTE_SLOW_SECONDS: ${QUOTE_SLOW_SECONDS:-8}
     restart: unless-stopped
+
+  # Postgres do agente, com pgvector. Faz dois papeis: checkpointer do LangGraph
+  # (memoria da conversa) E o indice vetorial das conversas antigas (few-shot).
+  # O agente aponta pra ca via POSTGRES_URL (ver agent/.env.example).
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+      POSTGRES_DB: langgraph
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d langgraph"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # O agente. `docker compose up` sobe quote-api + postgres + agent.
+  agent:
+    build: ./agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      quote-api:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      # Precisa de um .env na raiz com GOOGLE_API_KEY (o compose le sozinho).
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?defina GOOGLE_API_KEY em .env}
+      AGENT_MODEL: ${AGENT_MODEL:-gemini-2.5-flash}
+      # Nomes de servico (nao localhost) — rede interna do compose.
+      POSTGRES_URL: postgresql://agent:agent@postgres:5432/langgraph
+      QUOTE_API_URL: http://quote-api:8000
+    volumes:
+      - modelcache:/root/.cache # cache do modelo de embedding (fastembed)
+      - ./agent/logs:/srv/logs  # trace.jsonl acessivel no host (log de execucao)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # Indexacao do few-shot (pgvector). NAO sobe no `up` normal — so sob demanda:
+  #   docker compose --profile index up indexer
+  # Idempotente: pula se a tabela ja estiver populada (REINDEX=1 pra forcar).
+  indexer:
+    build: ./agent
+    profiles: ["index"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_URL: postgresql://agent:agent@postgres:5432/langgraph
+      DATASET_PATH: /data/conversations.parquet
+    volumes:
+      - ./dataset:/data:ro # o parquet (fora de agent/) entra por mount
+      - modelcache:/root/.cache
+    command: ["uv", "run", "python", "-m", "eval.build_index"]
+
+volumes:
+  pgdata:
+  modelcache:
