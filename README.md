@@ -57,27 +57,39 @@ Pra **forçar** a reconstrução do índice (ex.: mudou o dataset), passe `-e RE
 docker compose --profile index run --rm -e REINDEX=1 indexer
 ```
 
+**Testar os cenários:** o [TESTES.md](TESTES.md) traz um roteiro com `curl` pronto pra
+cada caso — cotação OK, `/quote` fora do ar, cotação recusada, lead pedindo humano e
+fora de escopo — além de como forçar o comportamento da `/quote` e ler os logs.
+
 **Trace da execução:** cada passo é gravado em `agent/logs/trace.jsonl` (ver
 [Rastreabilidade](#rastreabilidade) e [Log de execução](#log-de-execução)).
 
 ## Arquitetura
 
-```
-   lead (WhatsApp) ──POST /webhook──►  Agente (FastAPI + LangGraph)
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    ▼                     ▼                      ▼
-              quote-service         Postgres (pgvector)     trace.jsonl
-              (POST /quote,       checkpointer da conversa   (auditoria)
-               instavel)          + indice de few-shot
+```mermaid
+flowchart TD
+    lead["lead (WhatsApp)"] -->|POST /webhook| agent["Agente<br/>(FastAPI + LangGraph)"]
+    agent --> quote["quote-service<br/>(POST /quote, instável)"]
+    agent -->|checkpointer + few-shot| pg[("Postgres (pgvector)<br/>estado da conversa + índice de conversas")]
+    agent --> trace["trace.jsonl<br/>(auditoria)"]
+
+    subgraph idx ["Indexação (offline, 1x)"]
+        dataset["dataset<br/>(conversas.parquet)"] --> indexer["indexer<br/>(PII mascarada + embeddings)"]
+    end
+    indexer --> pg
 ```
 
 **O grafo do agente** ([agent/app/agent.py](agent/app/agent.py)):
 
-```
-START → model ──(tool_use?)──► quote ──► model      (loop de cotação)
-             └──(texto)──────► respond ──(handoff?)──► handoff → END
-                                     └──────────────────────► END
+```mermaid
+flowchart LR
+    start([START]) --> model
+    model -->|tool_use?| quote
+    quote --> model
+    model -->|texto| respond
+    respond -->|handoff?| handoff
+    respond --> fim([END])
+    handoff --> fim
 ```
 
 - **model** — chama o Gemini com a tool `cotar`; injeta few-shot no system prompt.
@@ -240,7 +252,9 @@ cenários**, cobrindo o caminho feliz e os quatro motivos de handoff:
 | `s5-escopo` | lead pergunta de plano de saúde | `handoff: fora_de_escopo` |
 
 Para regenerar um log real de ponta a ponta, suba o stack com uma `GOOGLE_API_KEY`
-válida e rode as conversas acima no `/webhook` e para simular instabilidade basta interagir com os parâmetros da API `QUOTE_FAILURE_RATE`; `QUOTE_SLOW_RATE`; `QUOTE_SLOW_SECONDS`
+válida e siga o roteiro do [TESTES.md](TESTES.md), que tem o `curl` de cada cenário e
+como forçar a instabilidade da `/quote` (`QUOTE_FAILURE_RATE`, `QUOTE_SLOW_RATE`,
+`QUOTE_SLOW_SECONDS`).
 
 ---
 
