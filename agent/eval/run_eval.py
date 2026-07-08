@@ -1,19 +1,5 @@
-"""Avaliacao/analise em cima do historico indexado.
-
-Ideia: pra cada objecao tipica do lead, buscar as conversas passadas mais
-parecidas e ver o DESFECHO delas. Isso vira insight de melhoria — "quando o lead
-reclama de preco, o que costumou converter?" — e base pra escolher few-shots.
-
-Rodar (com o Postgres do docker-compose de pe):
-    cd agent
-    uv sync --extra index
-    uv run python -m eval.build_index   # 1x: indexa no pgvector
-    uv run python -m eval.run_eval
-"""
 from __future__ import annotations
-
 from collections import Counter
-
 from app import retrieval
 
 OBJECOES = [

@@ -1,18 +1,3 @@
-"""Orquestracao do agente com LangGraph.
-
-Por que LangGraph: grafo de estados explicito, checkpointer duravel (estado por
-conversation_id, no Postgres) e human-in-the-loop de verdade (`interrupt()`) pro
-handoff. O MODELO e um Gemini via LangChain (`ChatGoogleGenerativeAI`) — escolhido
-por ter tier gratis no Google AI Studio, entao o avaliador roda sem barreira.
-LangGraph cuida do fluxo/estado; a extracao/decisao ficam com o modelo; a chamada
-da /quote e a resiliencia ficam no nosso codigo (quote_client).
-
-Grafo:
-
-    START -> model --(tool_calls?)--> quote --> model   (loop de cotacao)
-                   \\--(texto)--------> respond --(handoff?)--> handoff -> END
-                                                  \\--------------------> END
-"""
 from __future__ import annotations
 import json
 import re
@@ -21,16 +6,18 @@ from typing import Annotated, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import START, END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-from . import config, handoff, tracing
+from . import config, handoff, retrieval, tracing
 from .quote_client import QuoteOutcome, QuoteResult, cotar
 from .tools import COTAR_TOOL, SYSTEM_PROMPT
 
 
-# Modelo de chat: Gemini (GOOGLE_API_KEY). temperature=0 pra respostas estaveis.
 _llm = ChatGoogleGenerativeAI(
     model=config.AGENT_MODEL,
     temperature=0,
@@ -39,11 +26,9 @@ _llm = ChatGoogleGenerativeAI(
 
 
 class State(TypedDict):
-    # `add_messages` acumula/mescla mensagens LangChain ao longo da conversa. O
-    # checkpointer persiste esse historico por thread_id (conversation_id).
     messages: Annotated[list, add_messages]
     conversation_id: str
-    forced_handoff: str | None   # gatilho de handoff vindo da cotacao (por turno)
+    forced_handoff: str | None
     handed_off: bool
 
 
@@ -53,11 +38,7 @@ class AgentReply:
     handed_off: bool = False
 
 
-# --- Nos do grafo ---
-
 def _call_model(state: State) -> dict:
-    # System prompt e reconstruido a cada chamada (com few-shot fresco) e NAO fica
-    # no historico — evita duplicar/inflar o estado persistido.
     system = SYSTEM_PROMPT + _fewshot_block(state)
     resp = _llm.invoke([SystemMessage(content=system), *state["messages"]])
     return {"messages": [resp]}
@@ -79,10 +60,9 @@ def _fewshot_block(state: State) -> str:
         return ""
 
     try:
-        from . import retrieval
         hits = retrieval.search_similar(last.content, k=config.FEWSHOT_K, outcome="ganho")
     except Exception:
-        return ""  # indice ausente / retrieval fora do ar -> segue sem few-shot
+        return ""
     if not hits:
         return ""
 
@@ -106,7 +86,7 @@ def _run_quotes(state: State) -> dict:
     """Executa cada chamada de `cotar` com o cliente resiliente, registra o trace
     e detecta handoff deterministico. Devolve os ToolMessage pro modelo formatar."""
     cid = state["conversation_id"]
-    last = state["messages"][-1]  # AIMessage com tool_calls
+    last = state["messages"][-1]
     forced = state.get("forced_handoff")
     tool_msgs = []
 
@@ -134,7 +114,6 @@ def _respond(state: State) -> dict:
     forced = state.get("forced_handoff")
     handed = bool(forced)
 
-    # Handoff sinalizado pelo modelo (marcador no texto) -> handoff.from_text.
     reason = handoff.from_text(text)
     if reason:
         text = handoff.strip_markers(text)
@@ -158,8 +137,6 @@ def _human_handoff(state: State) -> dict:
     return {}
 
 
-# --- Roteamento ---
-
 def _route_after_model(state: State) -> str:
     last = state["messages"][-1]
     if getattr(last, "tool_calls", None):
@@ -171,8 +148,6 @@ def _route_after_respond(state: State) -> str:
     return "handoff" if state.get("handed_off") else "end"
 
 
-# --- Build ---
-
 def _make_checkpointer():
     """Persiste o estado do grafo por conversation_id no Postgres, sobrevivendo a
     restart do processo. Pool de conexoes com autocommit + dict_row (exigidos pelo
@@ -182,10 +157,6 @@ def _make_checkpointer():
             "POSTGRES_URL nao setado. Suba o banco com `docker compose up` e "
             "copie .env.example para .env."
         )
-
-    from langgraph.checkpoint.postgres import PostgresSaver
-    from psycopg.rows import dict_row
-    from psycopg_pool import ConnectionPool
 
     pool = ConnectionPool(
         conninfo=config.POSTGRES_URL,
@@ -231,15 +202,11 @@ def handle_message(conversation_id: str, text: str) -> AgentReply:
         },
         cfg,
     )
-    # strip_markers e o unico sanitizador: garante que nenhum marcador [HANDOFF...]
-    # vaze pro lead (o AIMessage no state ainda tem o marcador cru; _respond so o
-    # remove pro trace). Idempotente quando nao ha marcador.
+
     reply = handoff.strip_markers(_last_ai_text(state["messages"]))
     handed = bool(state.get("handed_off")) or "__interrupt__" in state
     return AgentReply(text=reply, handed_off=handed)
 
-
-# --- Helpers ---
 
 def _last_ai_text(messages: list) -> str:
     for m in reversed(messages):
@@ -249,7 +216,7 @@ def _last_ai_text(messages: list) -> str:
         if isinstance(content, str):
             if content.strip():
                 return content.strip()
-        elif isinstance(content, list):  # blocos (raro no Gemini) -> junta os textos
+        elif isinstance(content, list):
             parts = [p.get("text", "") if isinstance(p, dict) else str(p) for p in content]
             joined = "".join(parts).strip()
             if joined:
@@ -273,7 +240,7 @@ def _tool_result_text(result: QuoteResult) -> str:
             f"DADOS_INVALIDOS: {result.motivo}. Peca ao lead pra confirmar os dados "
             "(idade e ano do veiculo) antes de tentar cotar de novo."
         )
-    # INDISPONIVEL
+
     return (
         "SISTEMA_INDISPONIVEL: a cotacao esta temporariamente fora do ar apos "
         "varias tentativas. NAO invente preco. Avise o lead com transparencia que "

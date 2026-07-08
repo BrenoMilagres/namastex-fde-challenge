@@ -1,20 +1,6 @@
-"""Constroi o indice vetorial das conversas antigas no Postgres (pgvector).
-
-Le o parquet, mascara a PII (eval/dataset.py), gera embeddings locais (fastembed)
-e insere numa tabela `conversas` com coluna `embedding vector(N)` + indice HNSW.
-Depois, o few-shot do agente e o eval/run_eval buscam por similaridade nessa tabela.
-
-Rodar 1x (com o Postgres do docker-compose de pe):
-    cd agent
-    uv sync --extra index
-    uv run python -m eval.build_index
-"""
 from __future__ import annotations
-
 import os
-
 import psycopg
-
 from app import config, retrieval
 from eval.dataset import build_documents
 

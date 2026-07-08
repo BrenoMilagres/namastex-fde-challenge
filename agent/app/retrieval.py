@@ -1,13 +1,7 @@
-"""Retrieval do historico de conversas via pgvector (no mesmo Postgres).
-
-As conversas antigas (mascaradas) vivem numa tabela `conversas` com uma coluna
-`embedding vector(N)`. A busca por similaridade e SQL puro (`<=>` = distancia
-cosseno). Usado pelo few-shot do agente (agent.py) e pela analise (eval/run_eval).
-
-Embedding local via fastembed (ONNX, CPU) — sem nuvem, sem key. O modelo e
-carregado uma vez e cacheado.
-"""
 from __future__ import annotations
+
+import psycopg
+from fastembed import TextEmbedding
 
 from . import config
 
@@ -17,7 +11,6 @@ _emb_model = None
 def _model():
     global _emb_model
     if _emb_model is None:
-        from fastembed import TextEmbedding
         _emb_model = TextEmbedding(config.EMBED_MODEL)
     return _emb_model
 
@@ -38,8 +31,6 @@ def _vec_literal(v: list[float]) -> str:
 def search_similar(query: str, k: int = 5, outcome: str | None = None) -> list[dict]:
     """Conversas passadas mais parecidas com `query` (distancia cosseno no
     pgvector). Filtra por desfecho quando `outcome` e dado."""
-    import psycopg
-
     qv = _vec_literal(embed_one(query))
     sql = """
         SELECT conversation_id, outcome, veiculo_texto, idade, text

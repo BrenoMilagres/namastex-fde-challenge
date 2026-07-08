@@ -1,19 +1,9 @@
-"""Constroi os documentos de conversa (com PII mascarada) a partir do parquet.
-
-A mascara de PII (app.pii.mask) roda AQUI, antes de qualquer coisa ir pro indice
-— nenhum dado sensivel sai. Uma conversa = um documento.
-"""
 from __future__ import annotations
-
 import os
 from pathlib import Path
-
 import pandas as pd
-
 from app.pii import mask
 
-# No host, o parquet fica em <repo>/dataset/. No container do indexer ele entra
-# por mount e o caminho vem de DATASET_PATH.
 _DEFAULT = Path(__file__).resolve().parents[2] / "dataset" / "conversations.parquet"
 DATASET = Path(os.getenv("DATASET_PATH", str(_DEFAULT)))
 

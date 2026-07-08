@@ -1,10 +1,3 @@
-"""Schema da tool `cotar` exposta ao modelo.
-
-Formato OpenAI-function (o que o `bind_tools` do LangChain espera). O modelo
-preenche plano_id/idade/veiculo_ano/cep/data_inicio a partir da conversa livre; o
-nosso codigo (quote_client) faz a chamada HTTP resiliente. cep e data_inicio sao
-opcionais (fora de `required`). O LLM conduz a extracao; a infra fica com a gente.
-"""
 from __future__ import annotations
 
 COTAR_TOOL = {

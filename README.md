@@ -1,13 +1,10 @@
-# AutoSeguro — Agente de Vendas (Desafio FDE / Namastex)
+# AutoSeguro — Agente de Vendas (Desafio FDE)
 
-Agente de vendas de seguro auto que atende um lead de ponta a ponta pelo estilo
-WhatsApp (português): **conversa → qualifica → cota → decide** (resolve sozinho ou
-passa pra um humano). O foco de engenharia está em **não quebrar nem inventar preço
-quando a API de cotação falha** — que é o ponto mais pesado da avaliação.
+Agente de vendas para uma seguradora de carros, que atende um lead de ponta a ponta: **conversa → qualifica → cota → decide** (resolve sozinho ou passa pra um humano).
 
 > O enunciado original do desafio está em [DESAFIO.md](DESAFIO.md).
 
-O que a solução entrega, em uma olhada:
+O que a solução entrega:
 
 - **Orquestração com LangGraph** (grafo de estados explícito) + **Gemini** (via LangChain).
 - **Cliente resiliente da `/quote`**: timeout curto, retry com backoff só em falha transitória, e **nunca fabrica preço** — falha vira handoff.
@@ -16,7 +13,7 @@ O que a solução entrega, em uma olhada:
 - **PII mascarada** antes de qualquer log — e antes de indexar o dataset.
 - **Memória durável** da conversa no Postgres (checkpointer do LangGraph).
 - **Few-shot** com as conversas que converteram, via busca vetorial (pgvector).
-- **Sobe tudo com Docker** (`docker compose up`).
+- **Sobe tudo com Docker**.
 
 ---
 
@@ -51,7 +48,7 @@ com o mesmo id pra qualificar, escolher plano e cotar.
 
 O passo 3 é executado uma vez (o índice fica no volume do Postgres e sobrevive a
 restarts; rodar de novo apenas confirma e pula). Se você pular esse passo, o agente
-**funciona igual** — só sem os exemplos de few-shot, que degradam graciosamente.
+**funciona igual** — só sem os exemplos de few-shot.
 
 Pra **forçar** a reconstrução do índice (ex.: mudou o dataset), passe `-e REINDEX=1`
 **antes** do nome do serviço:
@@ -62,21 +59,6 @@ docker compose --profile index run --rm -e REINDEX=1 indexer
 
 **Trace da execução:** cada passo é gravado em `agent/logs/trace.jsonl` (ver
 [Rastreabilidade](#rastreabilidade) e [Log de execução](#log-de-execução)).
-
-<details>
-<summary>Rodar no host (dev, sem Docker do agente)</summary>
-
-```bash
-cp .env.example .env                         # na raiz; cole a GOOGLE_API_KEY
-docker compose up -d quote-api postgres      # dependencias
-cd agent && uv sync
-uv run uvicorn app.main:app --env-file ../.env --port 8080
-```
-As URLs padrão do `.env` já apontam pro `localhost` (modo host). No Docker, o
-compose sobrescreve com os nomes de serviço.
-</details>
-
----
 
 ## Arquitetura
 
@@ -167,8 +149,8 @@ A mesma máscara roda também na indexação do dataset — nada sensível entra
   O modelo entra por `bind_tools` do LangChain — LangGraph cuida do fluxo/estado; o
   modelo, da extração/decisão; a chamada da `/quote`, do nosso código.
 - **Gemini Flash** (`gemini-2.5-flash`) no loop de chat: no **tier gratuito** do Google
-  AI Studio — o avaliador roda sem barreira de billing. Acerta o caso-crux (avisar o
-  lead com transparência quando a `/quote` cai). `temperature=0` pra respostas estáveis.
+  AI Studio — roda sem barreira de billing. Acerta em avisar o
+  lead com transparência quando a `/quote` cai. `temperature=0` pra respostas estáveis.
   Trocável por outro modelo/provider via `AGENT_MODEL` + o chat model do LangChain,
   sem mexer no grafo.
   > O free tier tem **limite de requisições por dia por modelo**. Se esbarrar
@@ -185,8 +167,7 @@ guardado como dicts JSON-serializáveis, então a conversa sobrevive a restart.
 similaridade no **pgvector** (mesmo Postgres). Embedding local via `fastembed` (CPU).
 
 **Ressalva:** no dataset, temos os preços sem ter a confirmação de que foram consultados da
-API. Usar isso cru como "bom exemplo" ensinaria o agente a fabricar preço —
-exatamente o que o desafio penaliza. Por isso o few-shot: (1) filtra só `ganho`,
+API. Usar isso cru como "bom exemplo" ensinaria o agente a fabricar preço. Por isso o few-shot: (1) filtra só `ganho`,
 (2) **remove os preços** dos exemplos, (3) instrui explicitamente *"aprenda o tom/objeção,
 NUNCA cite preço — sempre cote pela tool"*. É few-shot de **estilo**, não de comportamento
 de cotação. Desligável com `FEWSHOT_ENABLED=0`.
@@ -222,7 +203,7 @@ objeção. Serve de insumo pro few-shot e pra entender padrões de objeção.
 cd agent && uv run python -m eval.run_eval
 ```
 
-> Nota honesta: como as conversas são sintéticas e o desfecho é atribuído
+> Nota: como as conversas são sintéticas e o desfecho é atribuído
 > proceduralmente (não causal), o valor analítico é limitado — o uso principal do
 > dataset aqui é o few-shot de tom/objeção.
 
@@ -255,22 +236,56 @@ cenários**, cobrindo o caminho feliz e os quatro motivos de handoff:
 | `s5-escopo` | lead pergunta de plano de saúde | `handoff: fora_de_escopo` |
 
 Para regenerar um log real de ponta a ponta, suba o stack com uma `GOOGLE_API_KEY`
-válida e rode as conversas acima no `/webhook`.
+válida e rode as conversas acima no `/webhook` e para simular instabilidade basta interagir com os parâmetros da API `QUOTE_FAILURE_RATE`; `QUOTE_SLOW_RATE`; `QUOTE_SLOW_SECONDS`
 
 ---
 
 ## Próximos passos (produção)
 
-A mesma base sobe na nuvem trocando implementações **por configuração**, sem fork da
-lógica (foi por isso que o estado do grafo é serializável e o retrieval tem interface
-estável):
+Essa mesma base pode ser entregue na nuvem trocando implementações **por configuração**, sem fork da
+lógica: o estado do grafo é serializável, o retrieval tem interface estável e tudo
+que muda entre dev/prod já está em [config.py](agent/app/config.py). O que falta pra
+uma solução robusta é **infra gerenciada, rede privada e governança** ao redor.
 
-- **Memória** → Postgres gerenciado (só muda a connection string).
-- **Retrieval/few-shot** → um vector store gerenciado (ex.: Azure AI Search) no lugar do pgvector.
-- **Canal** → WhatsApp real (ex.: Azure Communication Services / Meta) entregando no `/webhook`.
-- **Deploy do agent e API** → containers gerenciados + secrets em cofre.
+Como referência concreta, uso o acelerador oficial da Microsoft
+**[Deploy-Your-AI-Application-In-Production](https://github.com/microsoft/Deploy-Your-AI-Application-In-Production)**,
+que entrega exatamente essa *landing zone* — rede privada com *private endpoints*,
+Key Vault, observabilidade e governança — **versionada em Bicep** (e replicável em
+**Terraform**), então a infra sobe reproduzível e revisável por PR :
 
-Mantive isso como narrativa, não como código, pra a entrega ficar focada no que é avaliado.
+![Arquitetura de referência — AI Landing Zone (Microsoft)](images/azure_infra_template.png)
+
+### Da nossa solução para essa arquitetura
+
+| Peça hoje (local) | Equivalente gerenciado (diagrama) | Ganho |
+|---|---|---|
+| Agent FastAPI + LangGraph no Docker | **App Service / Agent Service** na AI-Landing Zone (*Agent Service Subnet*) | escala horizontal, deploy sem downtime, sem porta pública |
+| Modelo Gemini via key no `.env` | **Microsoft Foundry → Models** (ou Azure OpenAI) atrás de *private endpoint* | modelo na VNet, sem chave em env; quota/SLA gerenciados |
+| Checkpointer + estado no Postgres do compose | **Data Sources → PostgreSQL** gerenciado com *private endpoint* | HA, backup e PITR; connection string no Key Vault |
+| Few-shot no pgvector (mesmo Postgres) | **AI Search** vetorial (ou pgvector gerenciado) | índice gerenciado, retrieval escala independente da app |
+| Embeddings locais (fastembed/ONNX, CPU) | modelo de **embedding no Foundry** | tira o CPU-bound da app; escala elástica |
+| Dataset `.parquet` + `build_index` local | **Fabric Lakehouse (Bronze/Silver/Gold)** alimentando a indexação | pipeline de dados versionado (medallion), reprocessável |
+| `GOOGLE_API_KEY` no `.env` | **Key Vault + Managed Identity** | zero segredo em código/env; rotação automática |
+| Trace JSONL em arquivo | **Log Analytics / App Insights / Monitor** | busca, alertas e retenção; correlação por `conversation_id` |
+| Máscara de PII em regex (app) | complementada por **Purview → DSPM / DLP / Data Map** | governança de dado sensível ponta a ponta |
+| — | **Entra + Role Assignments + Policy + Defender for Cloud** | identidade, RBAC mínimo e postura de segurança |
+
+### Escalabilidade e segurança ao longo do fluxo
+
+- **Deploy do agente** → container gerenciado com autoescala; rede privada (só
+  *private endpoints*, sem exposição pública) e *jump box* pra operação; segredos e
+  connection strings no Key Vault via *managed identity*.
+- **Indexação** → o dataset vira camada de dados no Fabric (Bronze→Silver→Gold) e a
+  indexação roda como job idempotente (já é assim hoje, com `REINDEX`), agora
+  disparável por pipeline e escrevendo no vector store gerenciado.
+- **Retrieval** → busca vetorial dedicada (AI Search) escala separada da app, com
+  embeddings servidos pelo Foundry — toda a chamada dentro da VNet.
+- **Observabilidade e governança** → trace → Monitor/App Insights; PII também coberta
+  por Purview (DLP/DSPM); acesso por Entra + RBAC + Policy + Defender for Cloud.
+
+Mantive isso como **narrativa + referência**, não como código, pra a entrega ficar
+focada no que é avaliado — mas o caminho de produção é o acelerador acima, provisionado
+com Bicep ou Terraform.
 
 ---
 
@@ -284,5 +299,6 @@ agent/                 # a solução
 docker-compose.yml     # quote-api + postgres(pgvector) + agent + indexer(profiled)
 quote-service/         # mock instável da /quote (insumo do desafio)
 dataset/               # conversas sintéticas + dicionário (insumo do desafio)
+images/                # diagrama de referência (próximos passos)
 DESAFIO.md             # enunciado original
 ```

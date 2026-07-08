@@ -1,12 +1,3 @@
-"""Webhook FastAPI — interface do agente.
-
-POST /webhook   { conversation_id, message } -> { reply, handed_off }
-GET  /health    health check
-
-Simula o canal de WhatsApp: um provedor faz POST a cada mensagem do lead e a
-gente responde. O estado da conversa vive no checkpointer do LangGraph (ver
-agent.py), indexado por conversation_id.
-"""
 from __future__ import annotations
 
 from fastapi import FastAPI

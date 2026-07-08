@@ -1,12 +1,3 @@
-"""Tracing estruturado (JSONL append-only).
-
-Criterio do desafio: "da pra rastrear o que aconteceu? cada mensagem/cotacao,
-com id e status". Cada evento e uma linha JSON com conversation_id, tipo, e o
-que importa daquele passo. PII e mascarada antes de escrever.
-
-Formato simples de proposito: um `tail -f logs/trace.jsonl | jq` mostra a
-conversa inteira acontecendo, e da pra reconstruir qualquer atendimento.
-"""
 from __future__ import annotations
 import json
 import os
